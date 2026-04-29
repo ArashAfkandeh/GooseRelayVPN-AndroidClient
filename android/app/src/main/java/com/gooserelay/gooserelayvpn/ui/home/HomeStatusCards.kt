@@ -33,7 +33,8 @@ fun MdvConnectionTelemetryCard(
     proxyPort: Int,
     socksAuthEnabled: Boolean,
     socksUser: String,
-    socksPass: String
+    socksPass: String,
+    scanStatus: VpnManager.ScanStatus = VpnManager.ScanStatus()
 ) {
     MdvCardLow(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.fillMaxWidth().padding(MdvSpace.S3)) {
@@ -54,6 +55,21 @@ fun MdvConnectionTelemetryCard(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MdvColor.OnSurface
             )
+
+            // Show stats when available
+            if (scanStatus.statsActive > 0) {
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(MdvSpace.S1))
+                Text(
+                    text = "Active: ${scanStatus.statsActive} Sessions: ${scanStatus.statsSessionsOpen} open / ${scanStatus.statsSessionsClose} close",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MdvColor.OnSurfaceVariant
+                )
+                Text(
+                    text = "Bytes: ${formatSpeed(scanStatus.statsBytesOut)} / ${formatSpeed(scanStatus.statsBytesIn)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MdvColor.OnSurfaceVariant
+                )
+            }
 
             androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(MdvSpace.S1))
             Text(

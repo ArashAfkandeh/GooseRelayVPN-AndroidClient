@@ -86,6 +86,7 @@ fun HomeScreen(
     val isConnected = vpnState == VpnManager.VpnState.CONNECTED
     val isConnecting = vpnState == VpnManager.VpnState.CONNECTING
     val isDisconnecting = vpnState == VpnManager.VpnState.DISCONNECTING
+    val scanStatus by VpnManager.scanStatus.collectAsState()
 
     val statusColor by animateColorAsState(
         targetValue = when (vpnState) {
@@ -215,7 +216,8 @@ fun HomeScreen(
                             proxyPort = proxyPort,
                             socksAuthEnabled = socksAuthEnabled,
                             socksUser = socksUser,
-                            socksPass = socksPass
+                            socksPass = socksPass,
+                            scanStatus = scanStatus
                         )
                         Spacer(modifier = Modifier.height(MdvSpace.S3))
                         MdvProfileSelectorCard(
@@ -279,7 +281,8 @@ fun HomeScreen(
                     proxyPort = proxyPort,
                     socksAuthEnabled = socksAuthEnabled,
                     socksUser = socksUser,
-                    socksPass = socksPass
+                    socksPass = socksPass,
+                    scanStatus = scanStatus
                 )
 
                 Spacer(modifier = Modifier.height(MdvSpace.S3))

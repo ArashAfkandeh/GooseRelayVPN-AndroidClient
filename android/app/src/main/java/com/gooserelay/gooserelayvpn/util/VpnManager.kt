@@ -55,7 +55,14 @@ object VpnManager {
     data class ScanStatus(
         val scanning: Boolean = false,
         val syncedUploadMtu: Int = 0,
-        val syncedDownloadMtu: Int = 0
+        val syncedDownloadMtu: Int = 0,
+        val statsActive: Int = 0,
+        val statsSessionsOpen: Int = 0,
+        val statsSessionsClose: Int = 0,
+        val statsBytesOut: Long = 0,
+        val statsBytesIn: Long = 0,
+        val statsPollsOk: Int = 0,
+        val statsPollsFail: Int = 0
     )
 
     private val _scanStatus = MutableStateFlow(ScanStatus())
@@ -184,6 +191,24 @@ object VpnManager {
     }
 
     private fun parseScanLine(line: String) {
+        // Parse STATS line
+        val statsMatch = Regex(
+            "active=(\\d+)\\s+sessions\\(open=(\\d+)\\s+close=(\\d+)\\)\\s+frames\\(out=(\\d+)\\s+in=(\\d+)\\)\\s+bytes\\(out=([0-9.]+)([KMG]?)\\s+in=([0-9.]+)([KMG]?)\\)",
+            RegexOption.IGNORE_CASE
+        ).find(line)
+        if (statsMatch != null) {
+            val bytesOut = parseBytes(statsMatch.groupValues[4], statsMatch.groupValues[5])
+            val bytesIn = parseBytes(statsMatch.groupValues[7], statsMatch.groupValues[8])
+            _scanStatus.value = _scanStatus.value.copy(
+                statsActive = statsMatch.groupValues[1].toIntOrNull() ?: 0,
+                statsSessionsOpen = statsMatch.groupValues[2].toIntOrNull() ?: 0,
+                statsSessionsClose = statsMatch.groupValues[3].toIntOrNull() ?: 0,
+                statsBytesOut = bytesOut,
+                statsBytesIn = bytesIn
+            )
+            return
+        }
+
         val syncedMatch = Regex(
             "Selected Synced Upload MTU:\\s*(\\d+)\\s*\\|\\s*Selected Synced Download MTU:\\s*(\\d+)",
             RegexOption.IGNORE_CASE
@@ -205,6 +230,16 @@ object VpnManager {
             line.contains("Session Initialized Successfully", ignoreCase = true)
         ) {
             _scanStatus.value = _scanStatus.value.copy(scanning = false)
+        }
+    }
+
+    private fun parseBytes(value: String, unit: String): Long {
+        val num = value.toDoubleOrNull() ?: return 0L
+        return when (unit.uppercase()) {
+            "G" -> (num * 1024 * 1024 * 1024).toLong()
+            "M" -> (num * 1024 * 1024).toLong()
+            "K" -> (num * 1024).toLong()
+            else -> num.toLong()
         }
     }
 
