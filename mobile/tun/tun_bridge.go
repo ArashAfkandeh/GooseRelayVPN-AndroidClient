@@ -5,11 +5,14 @@ package tun
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"sync"
 	"sync/atomic"
+	"syscall"
+	"time"
 )
 
 const (
@@ -163,6 +166,11 @@ func (b *Bridge) processPackets() {
 		if err != nil {
 			if b.ctx.Err() != nil {
 				return
+			}
+			// Non-blocking TUN reads commonly return EAGAIN/EWOULDBLOCK when idle.
+			if errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EWOULDBLOCK) {
+				time.Sleep(10 * time.Millisecond)
+				continue
 			}
 			log.Printf("[TUN-BRIDGE] Read error: %v", err)
 			continue
