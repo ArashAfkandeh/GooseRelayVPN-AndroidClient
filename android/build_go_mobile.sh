@@ -28,13 +28,4 @@ gomobile bind \
 
 echo "Built android/app/libs/gooserelayvpn.aar"
 
-# Build TUN module separately (doesn't modify original Go code)
-echo "Building TUN module..."
-gomobile bind \
-  -v \
-  -target=android/arm64,android/arm,android/amd64,android/386 \
-  -androidapi 21 \
-  -o android/app/libs/tun.aar \
-  ./mobile/tun/
-
-echo "Built android/app/libs/tun.aar"
+# TUN module is now included in gooserelayvpn.aar (no separate build needed)
