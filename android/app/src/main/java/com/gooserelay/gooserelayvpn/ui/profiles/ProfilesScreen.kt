@@ -227,6 +227,8 @@ private fun ProfileEditorDialog(
                 .joinToString(prefix = "[\"", postfix = "\"]", separator = "\",\""),
             scriptKeysText = scriptKeysText,
             tunnelKey = tunnelKey,
+            coalesceStepMs = profile?.coalesceStepMs ?: 0,
+            idleSlotsPerBucket = profile?.idleSlotsPerBucket ?: 1,
             isSelected = profile?.isSelected ?: false,
             createdAt = profile?.createdAt ?: System.currentTimeMillis()
         )
@@ -262,6 +264,8 @@ private fun ProfileEditorDialog(
                         sniJson = sniJson,
                         scriptKeysText = scriptKeysText,
                         tunnelKey = tunnelKey,
+                        coalesceStepMs = profile?.coalesceStepMs ?: 0,
+                        idleSlotsPerBucket = profile?.idleSlotsPerBucket ?: 1,
                         isSelected = profile?.isSelected ?: false,
                         createdAt = profile?.createdAt ?: System.currentTimeMillis()
                     )

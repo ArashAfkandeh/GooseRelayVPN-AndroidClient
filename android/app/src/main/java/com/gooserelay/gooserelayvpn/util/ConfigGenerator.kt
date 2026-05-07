@@ -20,6 +20,12 @@ object ConfigGenerator {
             add("sni", parseSni(profile.sniJson))
             add("script_keys", parseScriptKeys(profile.scriptKeysText))
             addProperty("tunnel_key", profile.tunnelKey)
+            if (profile.coalesceStepMs > 0) {
+                addProperty("coalesce_step_ms", profile.coalesceStepMs)
+            }
+            if (profile.idleSlotsPerBucket > 1) {
+                addProperty("idle_slots_per_bucket", profile.idleSlotsPerBucket)
+            }
         }
         return gson.toJson(root)
     }
@@ -39,6 +45,24 @@ object ConfigGenerator {
 
     private fun parseScriptKeys(text: String): JsonArray {
         val keys = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
-        return JsonArray().apply { keys.forEach { add(it) } }
+        val result = JsonArray()
+        for (key in keys) {
+            val trimmed = key.trim()
+            if (trimmed.isEmpty()) continue
+            val obj = JsonObject()
+            if (trimmed.contains("|")) {
+                val parts = trimmed.split("|")
+                if (parts.size >= 2) {
+                    obj.addProperty("id", parts[0].trim())
+                    obj.addProperty("account", parts[1].trim())
+                } else {
+                    obj.addProperty("id", trimmed)
+                }
+            } else {
+                obj.addProperty("id", trimmed)
+            }
+            result.add(obj)
+        }
+        return result
     }
 }

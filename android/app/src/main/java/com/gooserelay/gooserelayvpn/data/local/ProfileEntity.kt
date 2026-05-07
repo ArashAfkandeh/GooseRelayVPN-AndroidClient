@@ -16,6 +16,8 @@ data class ProfileEntity(
     val sniJson: String = "[\"www.google.com\",\"mail.google.com\",\"accounts.google.com\"]",
     val scriptKeysText: String = "",
     val tunnelKey: String = "",
+    val coalesceStepMs: Int = 0,
+    val idleSlotsPerBucket: Int = 1,
     val isSelected: Boolean = false,
     val createdAt: Long = System.currentTimeMillis()
 )

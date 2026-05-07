@@ -19,6 +19,8 @@ import (
 	"github.com/kianmhz/GooseRelayVPN/internal/socks"
 )
 
+var version = "dev"
+
 type clientLogWriter struct {
 	out      io.Writer
 	useColor bool
@@ -156,11 +158,18 @@ func main() {
 	if cfg.DebugTiming {
 		log.Printf("[client] debug_timing enabled — per-session TTFB and per-poll RTT will be logged")
 	}
-
+	if cfg.CoalesceStepMs > 0 {
+		log.Printf("[client] uplink coalescing: step=%dms (internal safety cap %dms; bursts of TX collapse into a single poll)", cfg.CoalesceStepMs, cfg.CoalesceMaxMs)
+	}
 	carr, err := carrier.New(carrier.Config{
-		ScriptURLs:  cfg.ScriptURLs,
-		AESKeyHex:   cfg.AESKeyHex,
-		DebugTiming: cfg.DebugTiming,
+		ScriptURLs:         cfg.ScriptURLs,
+		ScriptAccounts:     cfg.ScriptAccounts,
+		AESKeyHex:          cfg.AESKeyHex,
+		DebugTiming:        cfg.DebugTiming,
+		ClientVersion:      version,
+		CoalesceStep:       time.Duration(cfg.CoalesceStepMs) * time.Millisecond,
+		CoalesceMax:        time.Duration(cfg.CoalesceMaxMs) * time.Millisecond,
+		IdleSlotsPerBucket: cfg.IdleSlotsPerBucket,
 		Fronting: carrier.FrontingConfig{
 			GoogleIP: cfg.GoogleIP,
 			SNIHosts: cfg.SNIHosts,
@@ -203,7 +212,7 @@ func main() {
 		if cfg.SocksUser != "" {
 			log.Printf("[client] SOCKS5 auth enabled (RFC 1929 username/password required)")
 		}
-		if err := socks.Serve(ctx, cfg.ListenAddr, cfg.SocksUser, cfg.SocksPass, factory); err != nil {
+		if err := socks.Serve(ctx, cfg.ListenAddr, cfg.SocksUser, cfg.SocksPass, cfg.DebugTiming, factory); err != nil {
 			log.Fatalf("socks: %v", err)
 		}
 	}()

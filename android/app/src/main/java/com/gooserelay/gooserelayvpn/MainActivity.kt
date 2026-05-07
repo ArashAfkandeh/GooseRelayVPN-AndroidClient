@@ -125,6 +125,8 @@ class MainActivity : ComponentActivity() {
             val sniJson = parseSniJson(root.get("sni"))
             val scriptKeysText = parseScriptKeysJson(root.get("script_keys"))
             val tunnelKey = root.get("tunnel_key")?.asString ?: ""
+            val coalesceStepMs = root.get("coalesce_step_ms")?.asInt ?: 0
+            val idleSlotsPerBucket = root.get("idle_slots_per_bucket")?.asInt?.coerceIn(1, 3) ?: 1
 
             ProfileEntity(
                 name = name,
@@ -136,7 +138,9 @@ class MainActivity : ComponentActivity() {
                 googleHost = googleHost,
                 sniJson = sniJson,
                 scriptKeysText = scriptKeysText,
-                tunnelKey = tunnelKey
+                tunnelKey = tunnelKey,
+                coalesceStepMs = coalesceStepMs,
+                idleSlotsPerBucket = idleSlotsPerBucket
             )
         } catch (e: Exception) {
             null
@@ -175,7 +179,20 @@ class MainActivity : ComponentActivity() {
         if (scriptKeysElement == null || scriptKeysElement.isJsonNull) return ""
         return try {
             if (scriptKeysElement.isJsonArray) {
-                scriptKeysElement.asJsonArray.mapNotNull { it.asString }.joinToString("\n")
+                scriptKeysElement.asJsonArray.mapNotNull { element ->
+                    when {
+                        element.isJsonObject -> {
+                            val obj = element.asJsonObject
+                            val id = obj.get("id")?.asString?.trim()
+                            val account = obj.get("account")?.asString?.trim()
+                            if (id.isNullOrBlank()) null
+                            else if (account.isNullOrBlank()) id
+                            else "$id|$account"
+                        }
+                        element.isJsonPrimitive -> element.asString.trim()
+                        else -> null
+                    }
+                }.filter { it.isNotBlank() }.joinToString("\n")
             } else if (scriptKeysElement.isJsonPrimitive) {
                 scriptKeysElement.asString
             } else {

@@ -91,6 +91,14 @@ fun MdvConnectionTelemetryCard(
                             style = MaterialTheme.typography.bodySmall,
                             color = MdvColor.OnSurfaceVariant
                         )
+                        if (scanStatus.accountStats.isNotBlank()) {
+                            Text(
+                                text = "Accounts: ${scanStatus.accountStats}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MdvColor.OnSurfaceVariant,
+                                maxLines = 2
+                            )
+                        }
                     }
                 }
             }

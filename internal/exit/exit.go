@@ -6,17 +6,20 @@ package exit
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/kianmhz/GooseRelayVPN/internal/frame"
+	"github.com/kianmhz/GooseRelayVPN/internal/protocol"
 	"github.com/kianmhz/GooseRelayVPN/internal/session"
 	"golang.org/x/net/proxy"
 )
@@ -117,6 +120,7 @@ type Config struct {
 	AESKeyHex     string // 64-char hex
 	DebugTiming   bool   // when true, log per-session dial breakdown and first-read latency
 	UpstreamProxy string // optional "host:port" of a local SOCKS5 proxy (e.g. WARP on 127.0.0.1:40000)
+	Version       string // build version string (exposed in /healthz and version probe)
 }
 
 // Server holds the per-process session state.
@@ -126,6 +130,7 @@ type Server struct {
 	dial        func(network, address string, timeout time.Duration) (net.Conn, error)
 	dns         *dnsCache
 	debugTiming bool
+	version     string
 
 	mu            sync.Mutex
 	sessions      map[[frame.SessionIDLen]byte]*session.Session
@@ -133,9 +138,10 @@ type Server struct {
 	txReady       map[[frame.SessionIDLen]byte]struct{}                // sessions with pending TX frames
 	firstReply    map[[frame.SessionIDLen]byte]struct{}                // sessions whose first downstream batch hasn't been sent yet
 	upstreams     map[[frame.SessionIDLen]byte]net.Conn                // upstream conn per session, kept so GC can force-close
-	lastActivity  map[[frame.SessionIDLen]byte]time.Time                // last time the client sent a frame for this session
+	lastActivity  map[[frame.SessionIDLen]byte]time.Time               // last time the client sent a frame for this session
 	dialFail      map[string]time.Time
 	pendingRSTs   map[[frame.ClientIDLen]byte][]*frame.Frame // RSTs queued per requesting client
+	pendingCtrl   map[[frame.ClientIDLen]byte][]*frame.Frame // control responses queued per client
 
 	// activity is a per-client wake channel. handleTunnel waits on the
 	// channel for its own clientID; openSession's TX callback kicks the
@@ -144,6 +150,10 @@ type Server struct {
 	// otherwise return empty and burn through HTTP requests.
 	activity map[[frame.ClientIDLen]byte]chan struct{}
 	stats    serverStats
+
+	// upstreamReadPool is a sync.Pool of upstreamReadBuf (256KiB) buffers
+	// reused across upstream pump goroutines.
+	upstreamReadPool sync.Pool
 }
 
 // serverStats holds atomic counters surfaced periodically by runStatsLoop.
@@ -168,12 +178,13 @@ func New(cfg Config) (*Server, error) {
 		return nil, err
 	}
 	dialFn := dialFunc(cfg.UpstreamProxy)
-	return &Server{
+	s := &Server{
 		cfg:           cfg,
 		aead:          aead,
 		dial:          dialFn,
 		dns:           newDNSCache(),
 		debugTiming:   cfg.DebugTiming,
+		version:       cfg.Version,
 		sessions:      make(map[[frame.SessionIDLen]byte]*session.Session),
 		sessionOwners: make(map[[frame.SessionIDLen]byte][frame.ClientIDLen]byte),
 		txReady:       make(map[[frame.SessionIDLen]byte]struct{}),
@@ -182,8 +193,14 @@ func New(cfg Config) (*Server, error) {
 		lastActivity:  make(map[[frame.SessionIDLen]byte]time.Time),
 		dialFail:      make(map[string]time.Time),
 		pendingRSTs:   make(map[[frame.ClientIDLen]byte][]*frame.Frame),
+		pendingCtrl:   make(map[[frame.ClientIDLen]byte][]*frame.Frame),
 		activity:      make(map[[frame.ClientIDLen]byte]chan struct{}),
-	}, nil
+	}
+	s.upstreamReadPool.New = func() interface{} {
+		buf := make([]byte, upstreamReadBuf)
+		return &buf
+	}
+	return s, nil
 }
 
 // dialFunc returns a dial function. When proxyAddr is non-empty it routes all
@@ -219,7 +236,18 @@ func (s *Server) ListenAndServe() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/tunnel", s.handleTunnel)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		payload, err := json.Marshal(map[string]interface{}{
+			"ok":       true,
+			"version":  s.version,
+			"protocol": protocol.ProtocolVersion,
+		})
+		if err != nil {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(payload)
 	})
 	httpSrv := &http.Server{
 		Addr:        s.cfg.ListenAddr,
@@ -429,12 +457,17 @@ func (s *Server) routeIncoming(f *frame.Frame, owner [frame.ClientIDLen]byte) {
 
 	if !exists {
 		if !f.HasFlag(frame.FlagSYN) {
+			if protocol.IsProbePayload(f.Payload) {
+				s.queueVersionResponse(owner, f.SessionID)
+				return
+			}
 			log.Printf("[exit] frame for unknown session (no SYN), sending RST")
 			s.queueRST(owner, f.SessionID)
 			s.stats.rstSent.Add(1)
 			return
 		}
 		if s.isDialSuppressed(f.Target) {
+			log.Printf("[exit] dial suppressed for %s (recent failure backoff); sending RST", f.Target)
 			s.queueRST(owner, f.SessionID)
 			s.stats.rstSent.Add(1)
 			return
@@ -467,6 +500,18 @@ func (s *Server) queueRST(owner [frame.ClientIDLen]byte, sessionID [frame.Sessio
 	rst := &frame.Frame{SessionID: sessionID, Flags: frame.FlagRST}
 	s.mu.Lock()
 	s.pendingRSTs[owner] = append(s.pendingRSTs[owner], rst)
+	s.mu.Unlock()
+	s.kick(owner)
+}
+
+func (s *Server) queueVersionResponse(owner [frame.ClientIDLen]byte, sessionID [frame.SessionIDLen]byte) {
+	payload, err := protocol.EncodeVersionInfo(s.version, MaxFramePayload, []string{"zstd", "raw_base64"})
+	if err != nil {
+		payload = []byte("{\"ok\":false}")
+	}
+	rst := &frame.Frame{SessionID: sessionID, Flags: frame.FlagRST, Payload: payload}
+	s.mu.Lock()
+	s.pendingCtrl[owner] = append(s.pendingCtrl[owner], rst)
 	s.mu.Unlock()
 	s.kick(owner)
 }
@@ -531,7 +576,14 @@ func (s *Server) openSession(id [frame.SessionIDLen]byte, target string, owner [
 	// Upstream → session.EnqueueTx (downstream direction).
 	go func() {
 		defer upstream.Close()
-		buf := make([]byte, upstreamReadBuf)
+		bufP := s.upstreamReadPool.Get().(*[]byte)
+		buf := *bufP
+		defer func() {
+			// Zero the pointer so we don't accidentally hold a reference;
+			// the pool returns the slice header so future Reads get a fresh
+			// buffer view but back the same allocation.
+			s.upstreamReadPool.Put(bufP)
+		}()
 		firstRead := true
 		for {
 			n, err := upstream.Read(buf)
@@ -550,6 +602,13 @@ func (s *Server) openSession(id [frame.SessionIDLen]byte, target string, owner [
 					log.Printf("[exit] upstream read %x: %v", id[:4], err)
 				}
 				sess.RequestClose()
+				// Stop the session so rxLoop exits and its defer closes RxChan,
+				// which unblocks the write goroutine below and lets both pump
+				// goroutines exit cleanly. Using Stop() here (rather than
+				// CloseRx() directly) avoids racing with an in-flight deliverRx
+				// that has released the session mutex but not yet sent on
+				// RxChan — closing RxChan out from under it would panic.
+				sess.Stop()
 				return
 			}
 		}
@@ -585,6 +644,11 @@ func (s *Server) drainAll(owner [frame.ClientIDLen]byte, byteBudget int) ([]*fra
 	defer s.mu.Unlock()
 	var out []*frame.Frame
 	var urgent bool
+	if ctrl := s.pendingCtrl[owner]; len(ctrl) > 0 {
+		out = append(out, ctrl...)
+		delete(s.pendingCtrl, owner)
+		urgent = true
+	}
 	if rsts := s.pendingRSTs[owner]; len(rsts) > 0 {
 		out = append(out, rsts...)
 		delete(s.pendingRSTs, owner)
@@ -596,14 +660,31 @@ func (s *Server) drainAll(owner [frame.ClientIDLen]byte, byteBudget int) ([]*fra
 	}
 	remaining := batchCap
 	remainingBytes := byteBudget
+
+	// Snapshot and sort active sessions by queue age to ensure fairness.
+	type sessionRef struct {
+		id       [frame.SessionIDLen]byte
+		queuedAt time.Time
+	}
+	refs := make([]sessionRef, 0, len(s.txReady))
 	for id := range s.txReady {
+		if sess, ok := s.sessions[id]; ok {
+			if s.sessionOwners[id] != owner {
+				continue
+			}
+			refs = append(refs, sessionRef{id: id, queuedAt: sess.FirstQueuedAt()})
+		} else {
+			delete(s.txReady, id)
+		}
+	}
+	sort.Slice(refs, func(i, j int) bool {
+		return refs[i].queuedAt.Before(refs[j].queuedAt)
+	})
+
+	for _, r := range refs {
+		id := r.id
 		if remaining <= 0 || remainingBytes <= 0 {
 			break
-		}
-		if s.sessionOwners[id] != owner {
-			// Belongs to a different client; leave the txReady entry in place
-			// so that client's poll picks it up.
-			continue
 		}
 		sess, ok := s.sessions[id]
 		if !ok {
@@ -615,7 +696,16 @@ func (s *Server) drainAll(owner [frame.ClientIDLen]byte, byteBudget int) ([]*fra
 			perSessionCap = remaining
 		}
 		frames := sess.DrainTxLimited(MaxFramePayload, perSessionCap)
-		delete(s.txReady, id) // OnTx re-adds if more data arrives
+		// Only clear from txReady when fully drained. A partial drain (cap
+		// hit before all data + a trailing FIN could be emitted) needs to
+		// stay queued, otherwise the session is stranded with no path back
+		// into drainAll — OnTx only fires on new EnqueueTx/RequestClose, not
+		// on leftover bytes — and the FIN never reaches the client until the
+		// 10-minute idle GC reaps it. That's why ~270 closed sessions linger
+		// in s.sessions as zombies under sustained load.
+		if !sess.HasPendingTx() {
+			delete(s.txReady, id)
+		}
 		if len(frames) > 0 {
 			if _, isFirst := s.firstReply[id]; isFirst {
 				urgent = true
@@ -649,6 +739,17 @@ func (s *Server) gcDoneSessions() {
 			delete(s.upstreams, id)
 			delete(s.lastActivity, id)
 			s.stats.sessionsClose.Add(1)
+		}
+	}
+	// Clean up activity channels for clients that have no active sessions.
+	// Prevents unbounded map growth when clients connect/disconnect repeatedly.
+	activeOwners := make(map[[frame.ClientIDLen]byte]struct{}, len(s.sessions))
+	for _, owner := range s.sessionOwners {
+		activeOwners[owner] = struct{}{}
+	}
+	for owner := range s.activity {
+		if _, stillActive := activeOwners[owner]; !stillActive {
+			delete(s.activity, owner)
 		}
 	}
 }

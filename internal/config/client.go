@@ -26,6 +26,28 @@ type Client struct {
 	DebugTiming bool   // when true, log per-session TTFB and per-poll Apps Script RTT
 	SocksUser   string // optional SOCKS5 username (RFC 1929); empty = no auth
 	SocksPass   string // optional SOCKS5 password (RFC 1929); empty = no auth
+
+	// ScriptAccounts is an optional parallel slice to ScriptURLs. When the user
+	// labels deployments with an `account` field in script_keys, the carrier
+	// uses these labels to aggregate per-account totals in the stats line so
+	// the user can see how much of each Google account's ~20k/day quota has
+	// been spent. Index i in this slice is the account label for ScriptURLs[i];
+	// empty string = unlabeled. Always the same length as ScriptURLs.
+	ScriptAccounts []string
+
+	// Adaptive uplink coalescing. When CoalesceStepMs > 0, the carrier waits
+	// up to that many ms for more TX ops to arrive before sending, resetting
+	// the timer on each new op. Bursts collapse into a single poll. Off by
+	// default (=0). The hard cap (~step × 25) is internal.
+	CoalesceStepMs int
+	CoalesceMaxMs  int
+
+	// IdleSlotsPerBucket controls how many concurrent idle long-polls the
+	// carrier maintains per account bucket. Default 1 (matches the bucket
+	// model's safe baseline). Raising to 2–3 increases download throughput
+	// when an account has multiple deployments, at the cost of more
+	// simultaneous executions on that account. 0 = use default.
+	IdleSlotsPerBucket int
 }
 
 // clientFile is the user-friendly client config format.
@@ -44,8 +66,13 @@ type clientFile struct {
 	// per domain name.
 	SNI json.RawMessage `json:"sni"`
 
-	// Apps Script Deployment IDs (one or more).
-	ScriptKeys []string `json:"script_keys"`
+	// Apps Script Deployment IDs (one or more). Each entry may be either:
+	//   - a plain string (the Deployment ID), or
+	//   - an object {"id": "...", "account": "..."} where account is an
+	//     optional human-readable label used to group deployments belonging
+	//     to the same Google account in the [stats] line. Mixing the two
+	//     forms is allowed.
+	ScriptKeys json.RawMessage `json:"script_keys"`
 
 	// Optional direct relay endpoints for local/integration testing.
 	// When set, these URLs are used as-is and Google fronting is disabled.
@@ -64,6 +91,19 @@ type clientFile struct {
 	// together — setting only one is an error.
 	SocksUser string `json:"socks_user"`
 	SocksPass string `json:"socks_pass"`
+
+	// Optional adaptive uplink coalescing. Both 0 = disabled (default).
+	// coalesce_step_ms: wait time for a burst of TX operation(s). Each new
+	// operation resets the timer. Set it to 0 to disable coalescing. The
+	// internal safety cap is derived from this value and is not user-configurable.
+	CoalesceStepMs int `json:"coalesce_step_ms"`
+
+	// Optional download-throughput tuning. Concurrent idle long-polls per
+	// account bucket. Default 1 (safe). Set to 2 to roughly double download
+	// throughput when each account has 2+ deployments. Higher than 3 is
+	// rejected — past that the per-account concurrency cap that issue #56
+	// surfaced becomes reachable again.
+	IdleSlotsPerBucket int `json:"idle_slots_per_bucket"`
 }
 
 func firstNonEmpty(values ...string) string {
@@ -144,6 +184,45 @@ func normalizeRelayURL(v string) (string, error) {
 		return "", fmt.Errorf("invalid relay_urls value %q: host is required", v)
 	}
 	return u.String(), nil
+}
+
+// scriptKeyEntry is the parsed result of one script_keys array element. The
+// JSON form is either a plain string (legacy / unlabeled) or an object with
+// id+account fields. Account is "" when unlabeled.
+type scriptKeyEntry struct {
+	ID      string `json:"id"`
+	Account string `json:"account"`
+}
+
+// parseScriptKeys turns the script_keys JSON value into a slice of entries.
+// Returns a usage-friendly error when a particular element is malformed so
+// the user can fix the right index without parsing line numbers.
+func parseScriptKeys(raw json.RawMessage) ([]scriptKeyEntry, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var arr []json.RawMessage
+	if err := json.Unmarshal(raw, &arr); err != nil {
+		return nil, fmt.Errorf("script_keys must be a JSON array (a list of strings or {id, account} objects)")
+	}
+	out := make([]scriptKeyEntry, 0, len(arr))
+	for i, item := range arr {
+		// Try the bare-string form first (preserves the existing config shape).
+		var s string
+		if err := json.Unmarshal(item, &s); err == nil {
+			out = append(out, scriptKeyEntry{ID: s})
+			continue
+		}
+		var obj scriptKeyEntry
+		if err := json.Unmarshal(item, &obj); err != nil {
+			return nil, fmt.Errorf("script_keys[%d] must be a Deployment ID string or an object {\"id\": \"...\", \"account\": \"...\"}", i)
+		}
+		if strings.TrimSpace(obj.ID) == "" {
+			return nil, fmt.Errorf("script_keys[%d] is an object without an \"id\" field — provide the Deployment ID there", i)
+		}
+		out = append(out, obj)
+	}
+	return out, nil
 }
 
 // validateDeploymentID checks that the value looks like an Apps Script
@@ -257,6 +336,7 @@ func LoadClient(path string) (*Client, error) {
 
 	useFronting := len(relayURLs) == 0
 	scriptURLs := relayURLs
+	scriptAccounts := make([]string, len(relayURLs)) // direct relay_urls have no account labels
 	googleIP := ""
 	var sniHosts []string
 
@@ -266,24 +346,36 @@ func LoadClient(path string) (*Client, error) {
 		googleIP = net.JoinHostPort(googleHost, strconv.Itoa(googlePort))
 		sniHosts = parseSNIHosts(f.SNI)
 
-		if len(f.ScriptKeys) == 0 {
+		entries, err := parseScriptKeys(f.ScriptKeys)
+		if err != nil {
+			return nil, err
+		}
+		if len(entries) == 0 {
 			return nil, fmt.Errorf("script_keys is empty in %s.\n  Fix: deploy apps_script/Code.gs as a Web App with Access: Anyone, then paste the Deployment ID into the script_keys array. See README Step 5", path)
 		}
 
-		deploymentIDs := make([]string, 0, len(f.ScriptKeys))
-		for i, raw := range f.ScriptKeys {
-			deploymentID := normalizeDeploymentID(raw)
+		// Dedupe by Deployment ID, keeping the first occurrence's account label.
+		seen := make(map[string]struct{}, len(entries))
+		deploymentIDs := make([]string, 0, len(entries))
+		accounts := make([]string, 0, len(entries))
+		for i, entry := range entries {
+			deploymentID := normalizeDeploymentID(entry.ID)
 			if err := validateDeploymentID(deploymentID); err != nil {
 				return nil, fmt.Errorf("script_keys[%d] is invalid: %v", i, err)
 			}
+			if _, dup := seen[deploymentID]; dup {
+				continue
+			}
+			seen[deploymentID] = struct{}{}
 			deploymentIDs = append(deploymentIDs, deploymentID)
+			accounts = append(accounts, strings.TrimSpace(entry.Account))
 		}
-		deploymentIDs = dedupeStrings(deploymentIDs)
 
 		scriptURLs = make([]string, 0, len(deploymentIDs))
 		for _, deploymentID := range deploymentIDs {
 			scriptURLs = append(scriptURLs, buildScriptURL(deploymentID))
 		}
+		scriptAccounts = accounts
 	}
 
 	socksUser := strings.TrimSpace(f.SocksUser)
@@ -292,16 +384,32 @@ func LoadClient(path string) (*Client, error) {
 		return nil, fmt.Errorf("socks_user and socks_pass must both be set or both be empty in %s", path)
 	}
 
+	if f.CoalesceStepMs < 0 {
+		return nil, fmt.Errorf("coalesce_step_ms must be >= 0 in %s (got %d)", path, f.CoalesceStepMs)
+	}
+	coalesceMax := 0
+	if f.CoalesceStepMs > 0 {
+		coalesceMax = f.CoalesceStepMs * 25
+	}
+
+	if f.IdleSlotsPerBucket < 0 || f.IdleSlotsPerBucket > 3 {
+		return nil, fmt.Errorf("idle_slots_per_bucket must be 0–3 in %s (got %d). 0 or unset = default (1, safest); 2–3 increases download throughput at the cost of more simultaneous executions per Google account, which can re-trigger issue #56 if your accounts can't sustain that concurrency", path, f.IdleSlotsPerBucket)
+	}
+
 	c := Client{
-		ListenAddr:  net.JoinHostPort(listenHost, strconv.Itoa(listenPort)),
-		GoogleIP:    googleIP,
-		SNIHosts:    sniHosts,
-		ScriptURLs:  scriptURLs,
-		UseFronting: useFronting,
-		AESKeyHex:   key,
-		DebugTiming: f.DebugTiming,
-		SocksUser:   socksUser,
-		SocksPass:   socksPass,
+		ListenAddr:                  net.JoinHostPort(listenHost, strconv.Itoa(listenPort)),
+		GoogleIP:                    googleIP,
+		SNIHosts:                    sniHosts,
+		ScriptURLs:                  scriptURLs,
+		ScriptAccounts:              scriptAccounts,
+		UseFronting:                 useFronting,
+		AESKeyHex:                   key,
+		DebugTiming:                 f.DebugTiming,
+		SocksUser:                   socksUser,
+		SocksPass:                   socksPass,
+		CoalesceStepMs:              f.CoalesceStepMs,
+		CoalesceMaxMs:               coalesceMax,
+		IdleSlotsPerBucket:          f.IdleSlotsPerBucket,
 	}
 	return &c, nil
 }

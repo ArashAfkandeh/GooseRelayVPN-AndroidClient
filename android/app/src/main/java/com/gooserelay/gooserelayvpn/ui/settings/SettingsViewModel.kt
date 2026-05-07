@@ -46,8 +46,23 @@ class SettingsViewModel @Inject constructor(
             }
             val keys = root.get("script_keys")
             val keyLines = if (keys != null && keys.isJsonArray) {
-                keys.asJsonArray.mapNotNull { it.asString?.trim() }.filter { it.isNotEmpty() }.joinToString("\n")
+                keys.asJsonArray.mapNotNull { element ->
+                    when {
+                        element.isJsonObject -> {
+                            val obj = element.asJsonObject
+                            val id = obj.get("id")?.asString?.trim()
+                            val account = obj.get("account")?.asString?.trim()
+                            if (id.isNullOrBlank()) null
+                            else if (account.isNullOrBlank()) id
+                            else "$id|$account"
+                        }
+                        element.isJsonPrimitive -> element.asString.trim()
+                        else -> null
+                    }
+                }.filter { it.isNotBlank() }.joinToString("\n")
             } else profile.scriptKeysText
+            val coalesceStepMs = root.get("coalesce_step_ms")?.asInt ?: 0
+            val idleSlotsPerBucket = root.get("idle_slots_per_bucket")?.asInt?.coerceIn(1, 3) ?: 1
 
             profile.copy(
                 debugTiming = root.get("debug_timing")?.asBoolean ?: profile.debugTiming,
@@ -58,7 +73,9 @@ class SettingsViewModel @Inject constructor(
                 googleHost = root.get("google_host")?.asString ?: profile.googleHost,
                 sniJson = gson.toJson(sniList),
                 scriptKeysText = keyLines,
-                tunnelKey = root.get("tunnel_key")?.asString ?: profile.tunnelKey
+                tunnelKey = root.get("tunnel_key")?.asString ?: profile.tunnelKey,
+                coalesceStepMs = coalesceStepMs,
+                idleSlotsPerBucket = idleSlotsPerBucket
             )
         } catch (_: Exception) {
             null

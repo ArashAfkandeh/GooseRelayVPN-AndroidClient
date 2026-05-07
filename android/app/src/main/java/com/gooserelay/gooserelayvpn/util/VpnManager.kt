@@ -60,6 +60,7 @@ object VpnManager {
         val statsBytesIn: String = "",
         val statsPollsOk: Int = 0,
         val statsPollsFail: Int = 0,
+        val accountStats: String = "",
         val hasStats: Boolean = false
     )
 
@@ -184,23 +185,36 @@ object VpnManager {
     }
 
     private fun parseScanLine(line: String) {
-        // Example:
-        // STATS INFO active=23 sessions(open=147 close=124) ... bytes(out=28.7MB in=924.9KB) polls(ok=1007 fail=0)
+        // New format: [stats] active=8 sessions=70/62 frames=259/365 bytes=13.8MB/883.5KB polls=404/0 rst=1 endpoints=3/3
         val active = Regex("active=(\\d+)", RegexOption.IGNORE_CASE).find(line)
             ?.groupValues?.getOrNull(1)?.toIntOrNull()
-        val sessions = Regex("sessions\\(open=(\\d+)\\s+close=(\\d+)\\)", RegexOption.IGNORE_CASE).find(line)
-        val bytes = Regex("bytes\\(out=([^\\s)]+)\\s+in=([^\\s)]+)\\)", RegexOption.IGNORE_CASE).find(line)
-        val polls = Regex("polls\\(ok=(\\d+)\\s+fail=(\\d+)\\)", RegexOption.IGNORE_CASE).find(line)
 
-        if (active != null && sessions != null && bytes != null && polls != null) {
+        val sessions = Regex("sessions=(\\d+)/(\\d+)", RegexOption.IGNORE_CASE).find(line)
+        val sessionsOpen = sessions?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+        val sessionsClose = sessions?.groupValues?.getOrNull(2)?.toIntOrNull() ?: 0
+
+        val bytes = Regex("bytes=([^/\\s]+)/([^\\s]+)", RegexOption.IGNORE_CASE).find(line)
+        val bytesOut = bytes?.groupValues?.getOrNull(1) ?: ""
+        val bytesIn = bytes?.groupValues?.getOrNull(2) ?: ""
+
+        val polls = Regex("polls=(\\d+)/(\\d+)", RegexOption.IGNORE_CASE).find(line)
+        val pollsOk = polls?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+        val pollsFail = polls?.groupValues?.getOrNull(2)?.toIntOrNull() ?: 0
+
+        // Accounts format: accounts=[air today=259 script=514 | mr4 today=258 script=506 | mr6 today=258 script=515]
+        val accounts = Regex("accounts=\\[(.+)\\]", RegexOption.IGNORE_CASE).find(line)
+        val accountStats = accounts?.groupValues?.getOrNull(1)?.trim() ?: ""
+
+        if (active != null && (bytesOut.isNotBlank() || sessionsOpen > 0 || accountStats.isNotBlank())) {
             _scanStatus.value = _scanStatus.value.copy(
                 statsActive = active,
-                statsSessionsOpen = sessions.groupValues[1].toIntOrNull() ?: 0,
-                statsSessionsClose = sessions.groupValues[2].toIntOrNull() ?: 0,
-                statsBytesOut = bytes.groupValues[1],
-                statsBytesIn = bytes.groupValues[2],
-                statsPollsOk = polls.groupValues[1].toIntOrNull() ?: 0,
-                statsPollsFail = polls.groupValues[2].toIntOrNull() ?: 0,
+                statsSessionsOpen = sessionsOpen,
+                statsSessionsClose = sessionsClose,
+                statsBytesOut = bytesOut,
+                statsBytesIn = bytesIn,
+                statsPollsOk = pollsOk,
+                statsPollsFail = pollsFail,
+                accountStats = accountStats,
                 hasStats = true
             )
         }
