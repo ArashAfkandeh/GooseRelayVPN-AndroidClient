@@ -54,131 +54,6 @@ class GooseRelayVpnService : VpnService() {
             "com.android.chrome"           // system Chrome on some OEMs
         )
 
-        // Browsers require WebView/GMS companions to function properly.
-        private val KNOWN_BROWSER_PACKAGES = setOf(
-            // Chrome
-            "com.android.chrome",
-            "com.chrome.beta",
-            "com.chrome.dev",
-            "com.chrome.canary",
-            // Firefox
-            "org.mozilla.firefox",
-            "org.mozilla.firefox_beta",
-            "org.mozilla.fenix",
-            "org.mozilla.reference.browser",
-            // Microsoft
-            "com.microsoft.emmx",
-            "com.microsoft.emmx.lite",
-            // Brave
-            "com.brave.browser",
-            "com.brave.browser_beta",
-            // Opera
-            "com.opera.browser",
-            "com.opera.browser_beta",
-            "com.opera.mini.native",
-            // Samsung
-            "com.sec.android.app.sbrowser",
-            "com.sec.android.app.sbrowser.edge",
-            // Others
-            "com.duckduckgo.mobile.android",
-            "com.vivaldi.browser",
-            "com.UCMobile.intl",
-            "com.kiwibrowser.browser",
-            "com.aurora.store",
-            "com.jio.security.jio secure",
-            "com.miui.securitycenter",
-            "com.symantec.mobilesecurity",
-            "com.lookout.enterprise.dte",
-            "com.wsandroid.suite",
-            "com.mcafee.android.msecure",
-            "com.google.android.apps.chromedev"
-        )
-
-        // Apps that require base companions to work through VPN.
-        // Many apps use WebView internally (Twitter/X, Facebook, Instagram, etc.)
-        // and need these packages in the tunnel for network to work.
-        private val APPS_NEEDING_COMPANIONS = setOf(
-            // Twitter/X (all versions - old Twitter app, new X app, lite, etc.)
-            "com.twitter.android",
-            "com.twitter.android.lite",
-            "com.twitter.cat",
-            "com.x.android",
-            // TikTok
-            "com.zhiliaoapp.musically",
-            "com.ss.android.ugc.trem",
-            // Facebook family
-            "com.facebook.katana",
-            "com.facebook.lite",
-            "com.facebook.messenger",
-            "com.facebook.orca",
-            "com.facebook.pages.app",
-            // Instagram
-            "com.instagram.android",
-            "com.instagram.barcode",
-            // WhatsApp & Meta
-            "com.whatsapp",
-            "com.whatsapp.w4b",
-            "com.whatsapp.work",
-            "com.meta.whatsapp",
-            // Snapchat
-            "com.snapchat.android",
-            "com.snapchat.lite",
-            // Google apps
-            "com.google.android.apps.maps",
-            "com.google.android.apps.photos",
-            "com.google.android.apps.docs",
-            "com.google.android.apps.tachplus",
-            "com.google.android.apps.youtube",
-            "com.google.android.apps.messaging",
-            "com.google.android.apps.talk",
-            // Microsoft
-            "com.microsoft.teams",
-            "com.microsoft.teams2",
-            "com.microsoft.Office.Outlook",
-            // Other popular apps
-            "com.dropbox.android",
-            "com.slack",
-            "com.discord",
-            "tv.twitch",
-            "com.reddit.frontpage",
-            "com.linkedin.android",
-            "com.pinterest",
-            "com.netflix.mediaclient",
-            "com.spotify.music",
-            "com.amazon.mShop.android.shopping",
-            "in.amazon.mShop.android.app",
-            "com.ebay.mobile",
-            "com.alibaba.aliexpresshd",
-            "com.shein.android",
-            "com.shopee.ph",
-            "com.grabtaxi.driver",
-            "com.zoom.videoshare",
-            "us.zoom.videomeeting",
-            "com.google.android.googlequicksearchbox",
-            "com.android.providers.extensions"
-        )
-
-        // Per-app companion mapping: app package -> its required companions.
-        // This ensures only the selected app gets its companions, not all apps.
-        private fun getCompanionsForApp(appPackage: String, pm: PackageManager): Set<String> {
-            val companions = mutableSetOf<String>()
-
-            // Always add base companions for apps that need them
-            if (appPackage in APPS_NEEDING_COMPANIONS) {
-                BASE_COMPANION_PACKAGES.filterTo(companions) { pkg ->
-                    runCatching { pm.getApplicationInfo(pkg, 0) }.isSuccess
-                }
-            }
-
-            // Add browser-specific companions only for browsers
-            if (appPackage in KNOWN_BROWSER_PACKAGES) {
-                (BASE_COMPANION_PACKAGES + BROWSER_COMPANION_PACKAGES).filterTo(companions) { pkg ->
-                    runCatching { pm.getApplicationInfo(pkg, 0) }.isSuccess
-                }
-            }
-
-            return companions
-        }
     }
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -383,30 +258,40 @@ class GooseRelayVpnService : VpnService() {
                             .filter { it.isNotEmpty() }
                             .toSet()
 
-                        val pm = packageManager
-                        val appCompanions = mutableSetOf<String>()
+                        if (globalSettings.splitTunnelMode == com.gooserelay.gooserelayvpn.util.SplitTunnelMode.INCLUDE) {
+                            val pm = packageManager
+                            val appCompanions = mutableSetOf<String>()
 
-                        userSelected.forEach { appPkg ->
-                            appCompanions.addAll(getCompanionsForApp(appPkg, pm))
-                        }
+                            (BASE_COMPANION_PACKAGES + BROWSER_COMPANION_PACKAGES).forEach { pkg ->
+                                if (runCatching { pm.getApplicationInfo(pkg, 0) }.isSuccess) {
+                                    appCompanions.add(pkg)
+                                }
+                            }
 
-                        // Do NOT include our own packageName here.
-                        // tun2socks reads from the TUN fd directly (not via the route table),
-                        // and Go core's outbound UDP sockets must bypass the TUN to reach
-                        // relay endpoints directly — exactly like the non-split path which
-                        // uses addDisallowedApplication(packageName).
-                        val finalAllowed = userSelected + appCompanions
+                            // Do NOT include our own packageName here.
+                            val finalAllowed = userSelected + appCompanions
 
-                        VpnManager.appendLog(
-                            "Split tunnel: ${userSelected.size} selected apps, " +
-                            "${appCompanions.size} companion packages added"
-                        )
+                            VpnManager.appendLog(
+                                "Split tunnel (Include): ${userSelected.size} apps, " +
+                                "${appCompanions.size} companions"
+                            )
 
-                        finalAllowed.forEach { pkg ->
-                            try {
-                                builder.addAllowedApplication(pkg)
-                            } catch (e: Exception) {
-                                VpnManager.appendLog("Split tunnel skip '$pkg': ${e.message}")
+                            finalAllowed.forEach { pkg ->
+                                try {
+                                    builder.addAllowedApplication(pkg)
+                                } catch (e: Exception) {
+                                    VpnManager.appendLog("Split tunnel skip '$pkg': ${e.message}")
+                                }
+                            }
+                        } else {
+                            VpnManager.appendLog("Split tunnel (Exclude): Bypassing ${userSelected.size} apps")
+                            try { builder.addDisallowedApplication(packageName) } catch (e: Exception) {}
+                            userSelected.forEach { pkg ->
+                                try {
+                                    builder.addDisallowedApplication(pkg)
+                                } catch (e: Exception) {
+                                    VpnManager.appendLog("Split tunnel skip '$pkg': ${e.message}")
+                                }
                             }
                         }
                     } else {
