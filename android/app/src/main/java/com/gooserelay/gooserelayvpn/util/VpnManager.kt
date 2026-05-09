@@ -71,6 +71,7 @@ object VpnManager {
     private var trafficMonitorJob: Job? = null
 
     private const val MAX_LOG_LINES = 2000
+    private val stampRegex = Regex("^\\d{4}[-/]\\d{2}[-/]\\d{2}\\s+\\d{2}:\\d{2}:\\d{2}")
 
     fun updateState(newState: VpnState) {
         _state.value = newState
@@ -86,9 +87,7 @@ object VpnManager {
     }
 
     fun appendLog(line: String) {
-        val dateFormat = SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.US)
-        val timestamp = dateFormat.format(Date())
-        appendLogInternal("$timestamp $line", LogSource.ANDROID)
+        appendLogInternal(line, LogSource.ANDROID)
     }
 
     fun appendCoreLog(line: String) {
@@ -96,7 +95,12 @@ object VpnManager {
     }
 
     private fun appendLogInternal(line: String, source: LogSource) {
-        val normalizedLine = normalizeLogTimestampToLocal(line)
+        var normalizedLine = normalizeLogTimestampToLocal(line)
+        if (!stampRegex.containsMatchIn(normalizedLine)) {
+            val dateFormat = SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.US)
+            val now = dateFormat.format(Date())
+            normalizedLine = "$now $normalizedLine"
+        }
         val current = _logEntries.value.toMutableList()
         current.add(LogEntry(normalizedLine, source))
         if (current.size > MAX_LOG_LINES) {
