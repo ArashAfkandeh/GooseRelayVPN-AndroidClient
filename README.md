@@ -28,11 +28,13 @@ The app wraps this flow in Android `VpnService` so selected/full traffic can be 
     <td align="center"><strong>Home</strong></td>
     <td align="center"><strong>Profiles</strong></td>
     <td align="center"><strong>Settings</strong></td>
+    <td align="center"><strong>Logs</strong></td>
   </tr>
   <tr>
-    <td><img src="https://via.placeholder.com/300x600/1f1f1f/ffffff?text=Home+Screen" alt="Home Screen" width="300"/></td>
-    <td><img src="https://via.placeholder.com/300x600/1f1f1f/ffffff?text=Profiles+Manager" alt="Profiles Manager" width="300"/></td>
-    <td><img src="https://via.placeholder.com/300x600/1f1f1f/ffffff?text=Settings+Screen" alt="Settings Screen" width="300"/></td>
+    <td><img src="screenshots/home.png" alt="Home Screen" width="300"/></td>
+    <td><img src="screenshots/profiles.png" alt="Profiles Manager" width="300"/></td>
+    <td><img src="screenshots/settings.png" alt="Settings Screen" width="300"/></td>
+    <td><img src="screenshots/logs.png" alt="Logs" width="300"/></td>
   </tr>
 </table>
 
@@ -40,12 +42,12 @@ The app wraps this flow in Android `VpnService` so selected/full traffic can be 
   <tr>
     <td align="center"><strong>Profile Import</strong></td>
     <td align="center"><strong>Profile Sharing</strong></td>
-    <td align="center"><strong>Logs</strong></td>
+    <td align="center"><strong>Settings Sharing</strong></td>
   </tr>
   <tr>
-    <td><img src="https://via.placeholder.com/300x600/1f1f1f/ffffff?text=Import+Profile" alt="Import Profile" width="300"/></td>
-    <td><img src="https://via.placeholder.com/300x600/1f1f1f/ffffff?text=Share+Profile" alt="Share Profile" width="300"/></td>
-    <td><img src="https://via.placeholder.com/300x600/1f1f1f/ffffff?text=Logs+Display" alt="Logs" width="300"/></td>
+    <td><img src="screenshots/import-profile.png" alt="Import Profile" width="300"/></td>
+    <td><img src="screenshots/share-profile.png" alt="Share Profile" width="300"/></td>
+    <td><img src="screenshots/import&share-settings.png" alt="Share Settings" width="300"/></td>
   </tr>
 </table>
 
