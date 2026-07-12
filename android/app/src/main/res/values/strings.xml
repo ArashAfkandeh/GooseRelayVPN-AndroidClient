@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">GooseRelayVPN-HN</string>
+    <string name="app_name">GooseRelayVPN</string>
     <string name="settings_title">Settings</string>
     <string name="profile_settings_title">Profile Settings</string>
     <string name="action_save">Save</string>
@@ -44,7 +44,7 @@
     <string name="title_home">Home</string>
     <string name="home_network_status">NETWORK STATUS</string>
     <string name="home_no_profile_selected">No profile selected</string>
-    <string name="home_brand_short">GooseRelay-HN</string>
+    <string name="home_brand_short">GooseRelayVPN</string>
     <string name="home_open_info">Open info page</string>
     <string name="home_state_connected">Connected</string>
     <string name="home_state_connecting">Connecting...</string>
@@ -103,7 +103,7 @@
     <string name="logs_clear">Clear Logs</string>
     <string name="logs_auto_on">Auto ON</string>
     <string name="logs_auto_off">Auto OFF</string>
-    <string name="logs_share_subject">GooseRelayVPN-HN Logs</string>
+    <string name="logs_share_subject">GooseRelayVPN Logs</string>
     <string name="logs_share_chooser">Share Logs</string>
     <string name="logs_filter_all">All</string>
     <string name="logs_filter_core">Core</string>
@@ -144,4 +144,9 @@
     <string name="project_main_github">https://github.com/Kianmhz/GooseRelayVPN</string>
     <string name="project_android_client_github">https://github.com/Hidden-Node/GooseRelayVPN-AndroidClient</string>
     <string name="engine_version">v1.7.1</string>
+    <string name="profiles_update_success">Profile updated from remote successfully</string>
+    <string name="profiles_update_error">Failed to update profile: %1$s</string>
+    <string name="profiles_updating">Updating from remote...</string>
+    <string name="profiles_no_selection_update">Please select a profile to update</string>
+    <string name="profiles_no_remote_url">This profile is local and doesn\'t have a remote URL to update from.</string>
 </resources>
