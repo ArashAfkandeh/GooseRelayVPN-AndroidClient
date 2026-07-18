@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">GooseRelayVPN</string>
+    <string name="app_name">GooseRelayVPN-HN</string>
     <string name="settings_title">Settings</string>
     <string name="profile_settings_title">Profile Settings</string>
     <string name="action_save">Save</string>
@@ -44,7 +44,7 @@
     <string name="title_home">Home</string>
     <string name="home_network_status">NETWORK STATUS</string>
     <string name="home_no_profile_selected">No profile selected</string>
-    <string name="home_brand_short">GooseRelayVPN</string>
+    <string name="home_brand_short">GooseRelayVPN-HN</string>
     <string name="home_open_info">Open info page</string>
     <string name="home_state_connected">Connected</string>
     <string name="home_state_connecting">Connecting...</string>
@@ -103,7 +103,7 @@
     <string name="logs_clear">Clear Logs</string>
     <string name="logs_auto_on">Auto ON</string>
     <string name="logs_auto_off">Auto OFF</string>
-    <string name="logs_share_subject">GooseRelayVPN Logs</string>
+    <string name="logs_share_subject">GooseRelayVPN-HN Logs</string>
     <string name="logs_share_chooser">Share Logs</string>
     <string name="logs_filter_all">All</string>
     <string name="logs_filter_core">Core</string>
