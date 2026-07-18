@@ -76,8 +76,8 @@ import com.gooserelay.gooserelayvpn.ui.theme.MdvSpace
 import com.gooserelay.gooserelayvpn.util.ConfigGenerator
 
 data class ScriptKeyEntry(
-    var id: String = "",
-    var account: String = ""
+    val id: String = "",
+    val account: String = ""
 )
 
 fun parseScriptKeysText(text: String): List<ScriptKeyEntry> {
