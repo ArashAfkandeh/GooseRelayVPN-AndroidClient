@@ -290,7 +290,7 @@ fun ProfilesScreen(
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text("From JSON") },
+                                text = { Text("From JSON File") },
                                 onClick = {
                                     menuExpanded = false
                                     importLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
