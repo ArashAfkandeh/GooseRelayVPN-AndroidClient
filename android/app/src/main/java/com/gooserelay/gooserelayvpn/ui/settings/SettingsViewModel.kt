@@ -66,10 +66,10 @@ class SettingsViewModel @Inject constructor(
 
             profile.copy(
                 debugTiming = root.get("debug_timing")?.asBoolean ?: profile.debugTiming,
-                socksHost = root.get("socks_host")?.asString ?: "127.0.0.1",
-                socksPort = root.get("socks_port")?.asInt?.coerceIn(1, 65535) ?: 1080,
-                socksUser = root.get("socks_user")?.asString ?: "",
-                socksPass = root.get("socks_pass")?.asString ?: "",
+                socksHost = root.get("socks_host")?.asString ?: profile.socksHost,
+                socksPort = root.get("socks_port")?.asInt?.coerceIn(1, 65535) ?: profile.socksPort,
+                socksUser = root.get("socks_user")?.asString ?: profile.socksUser,
+                socksPass = root.get("socks_pass")?.asString ?: profile.socksPass,
                 googleHost = root.get("google_host")?.asString ?: profile.googleHost,
                 sniJson = gson.toJson(sniList),
                 scriptKeysText = keyLines,
