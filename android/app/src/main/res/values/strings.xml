@@ -44,7 +44,7 @@
     <string name="title_home">Home</string>
     <string name="home_network_status">NETWORK STATUS</string>
     <string name="home_no_profile_selected">No profile selected</string>
-    <string name="home_brand_short">GooseRelayVPN-HN</string>
+    <string name="home_brand_short">GooseRelay-HN</string>
     <string name="home_open_info">Open info page</string>
     <string name="home_state_connected">Connected</string>
     <string name="home_state_connecting">Connecting...</string>
