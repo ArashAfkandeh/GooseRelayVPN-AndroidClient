@@ -16,9 +16,9 @@ enum class SplitTunnelMode { INCLUDE, EXCLUDE }
 data class GlobalSettings(
     val connectionMode: String = "VPN",
     val allowLan: Boolean = false,
-    val splitTunnelingEnabled: Boolean = true,
+    val splitTunnelingEnabled: Boolean = false,
     val splitTunnelMode: SplitTunnelMode = SplitTunnelMode.INCLUDE,
-    val splitPackagesCsv: String = "com.instagram.android,org.telegram.messenger,com.whatsapp,com.google.android.youtube,com.android.chrome,com.google.android.gm,com.android.vending,com.google.android.googlequicksearchbox,com.twitter.android,com.openai.chatgpt",
+    val splitPackagesCsv: String = "",
     val customDnsServers: String = "",
     val fakeDnsEnabled: Boolean = true,
     val internetSharingEnabled: Boolean = false,
@@ -77,13 +77,12 @@ object GlobalSettingsStore {
     }
 
     private fun Preferences.toModel(): GlobalSettings {
-        val defaultApps = "com.instagram.android,org.telegram.messenger,com.whatsapp,com.google.android.youtube,com.android.chrome,com.google.android.gm,com.android.vending,com.google.android.googlequicksearchbox,com.twitter.android,com.openai.chatgpt"
         return GlobalSettings(
             connectionMode = this[KEY_CONNECTION_MODE] ?: "VPN",
             allowLan = this[KEY_ALLOW_LAN] ?: false,
-            splitTunnelingEnabled = this[KEY_SPLIT_TUNNELING_ENABLED] ?: true,
+            splitTunnelingEnabled = this[KEY_SPLIT_TUNNELING_ENABLED] ?: false,
             splitTunnelMode = runCatching { SplitTunnelMode.valueOf(this[KEY_SPLIT_TUNNEL_MODE] ?: "INCLUDE") }.getOrDefault(SplitTunnelMode.INCLUDE),
-            splitPackagesCsv = this[KEY_SPLIT_PACKAGES] ?: defaultApps,
+            splitPackagesCsv = this[KEY_SPLIT_PACKAGES] ?: "",
             customDnsServers = this[KEY_CUSTOM_DNS_SERVERS] ?: "",
             fakeDnsEnabled = this[KEY_FAKE_DNS_ENABLED] ?: true,
             internetSharingEnabled = this[KEY_INTERNET_SHARING_ENABLED] ?: false,
